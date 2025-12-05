@@ -1,10 +1,16 @@
-# Steps to install on Apple silicon (ARM64)
+# Steps to install on Microsoft Windows x86_64
+
+Running on native Windows is technically possible but using WSL is highly recommended to avoid many problems.
+
+### Install Ubuntu on WSL/WSL2 for Windows
+
+Here we used Ubuntu 22.04.5 LTS (GNU/Linux 4.4.0-19041-Microsoft x86_64). Every command in these steps is executed inside the WSL/WSL2 system.
 
 ### Download Miniforge3 and install in default location
 ```
-wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh
-chmod +x Miniforge3-MacOSX-arm64.sh
-./Miniforge3-MacOSX-arm64.sh
+wget wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+chmod +x Miniforge3-Linux-x86_64.sh
+./Miniforge3-Linux-x86_64.sh
 ```
 
 ### Check installation and activate base environment ('conda' is now a function)
@@ -22,7 +28,7 @@ conda --version
 
 ### Switch to location of this repo, e.g.
 ```
-cd ~/git/run-esmfold
+cd /mnt/d/github/run-esmfold/
 ```
 
 ### Set up new environment and activate with the function (not binary)
@@ -31,7 +37,7 @@ cd ~/git/run-esmfold
 conda activate esmfold-env
 ```
 
-### Check that the correct Python was installed (i.e. not arm64 but x86_64)
+### Check that the correct Python was installed (i.e. x86_64)
 ```
 python -c "import platform; print(platform.platform()); print(platform.machine())"
 ```
@@ -61,16 +67,14 @@ model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
 print("ESMFold loaded ok")
 EOF
 ```
-If you see `OMP: Error #15: Initializing libomp.dylib, but found libomp.dylib already initialized.`, first run:
-```
-export KMP_DUPLICATE_LIB_OK=TRUE
-```
 and check again, you should see something like this:
 ```
-torch: 2.9.1
+torch: 2.9.1+cu128
 cuda: False
-mps: True
+mps: False
 ESMFold loaded ok
 ```
 
-The models are located at `~/.cache/huggingface/hub/models--facebook--esmfold_v1/blobs/` and the environment at `~/miniforge3/envs/esmfold-env/`.
+CUDA passthrough requires WSL2, so using WSL limits folding to CPU only.
+
+The models are located at ` ~/.cache/huggingface/hub/models--facebook--esmfold_v1/blobs/` and the environment at `~/miniforge3/envs/esmfold-env/`.
