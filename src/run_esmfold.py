@@ -8,6 +8,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import torch
@@ -76,15 +77,30 @@ def fold_sequence_to_pdb(sequence: str, device: torch.device) -> str:
     print(f"Using device: {device}", file=sys.stderr)
 
     # Load ESMFold from Hugging Face
+    # TIMING START
+    t_load0 = time.time()
+    
     model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1")
     #model.trunk.set_chunk_size(32) # trades lower peak memory for slower inference, use 64, 32, 16, 8 for more savings
     model = model.to(device)
     model.eval()
     enable_dropout(model)   # <-- enables dropout
 
+    t_load1 = time.time()
+    print(f"Model load time: {t_load1 - t_load0:.2f} sec", file=sys.stderr)
+
+    # INFERENCE TIMER
+    t_inf0 = time.time()
+    
     # High-level helper: returns a PDB string
     with torch.no_grad():
         pdb_str = model.infer_pdb(sequence)
+
+    t_inf1 = time.time()
+    print(f"Inference time: {t_inf1 - t_inf0:.2f} sec", file=sys.stderr)
+
+    # Optional total time
+    print(f"Total time: {t_inf1 - t_load0:.2f} sec", file=sys.stderr)
 
     return pdb_str
 
