@@ -8,7 +8,7 @@ Here we used Ubuntu 22.04.5 LTS (GNU/Linux 4.4.0-19041-Microsoft x86_64). Every 
 
 ### Download Miniforge3 and install in default location
 ```
-wget wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 chmod +x Miniforge3-Linux-x86_64.sh
 ./Miniforge3-Linux-x86_64.sh
 ```
@@ -70,7 +70,7 @@ EOF
 and check again, you should see something like this:
 ```
 torch: 2.9.1+cu128
-cuda: False
+cuda: True
 mps: False
 ESMFold loaded ok
 ```
