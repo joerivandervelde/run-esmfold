@@ -2,7 +2,7 @@
 Procedures and scripts to run ESMFold on various environments
 
 ### How to install
-* [Apple silicon](doc/install_apple)
+* [Apple silicon](doc/install_apple.md)
 * Windows 64-bit: to do
 * Linux 64-bit: to do
 
