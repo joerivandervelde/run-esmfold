@@ -28,7 +28,7 @@ TM-score= 0.99972
 ```
 
 Running the 1EZG example on a Windows PC with 16 GB RAM and 16GB VRAM (RTX 3070) via WSL2 Ubuntu-22.04:
-
+```
 CPU mode
 Model load time: 98.67 sec
 Inference time: 130.93 sec
@@ -38,3 +38,4 @@ GPU mode (cuda)
 Model load time: 165.74 sec
 Inference time: 49.58 sec
 Total time: 215.33 sec
+```
