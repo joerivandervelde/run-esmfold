@@ -27,7 +27,7 @@ You might get something like this
 TM-score= 0.99972
 ```
 
-Running the 1EZG example on a Windows PC with 16 GB RAM and 8GB VRAM (RTX 3070) via WSL2 Ubuntu-22.04:
+Running the 1EZG example on a Windows PC with 16GB RAM and 8GB VRAM (RTX 3070) via WSL2 Ubuntu-22.04:
 ```
 CPU mode
 Model load time: 98.67 sec
@@ -38,4 +38,12 @@ GPU mode (cuda)
 Model load time: 165.74 sec
 Inference time: 49.58 sec
 Total time: 215.33 sec
+```
+
+Running the first 800AA of COL7A1 (UniProt Q02388) on a Intel i7-4790K 4 cores @ 4GHz Windows PC with 32GB RAM via WSL Ubuntu-22.04:
+```
+CPU mode
+Model load time: 40.30 sec
+Inference time: 11640.37 sec
+Total time: 11680.67 sec
 ```
