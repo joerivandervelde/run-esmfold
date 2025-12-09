@@ -5,6 +5,7 @@ Procedures and scripts to run ESMFold on various environments
 * [Apple silicon](doc/install_apple.md)
 * [Windows 64-bit](doc/install_win.md)
 * Linux 64-bit: to do
+* [Nibbler HPC Cluster](doc/install_nibbler.md)
 
 ### Test run
 
@@ -52,13 +53,13 @@ Total time: 11680.67 sec
 
 To get an impression of time scaling, we try different residue lengths on the same hardware. Folding the first n residues of COL7A1 (UniProt Q02388) on a AMD Ryzen 5 5600X 6 cores @ 3.70GHz Windows PC with 16GB RAM and 8GB VRAM (RTX 3070) via WSL2 Ubuntu-22.04:
 
-|   n |     CPU |    GPU |
---------------------------
-| 100 |  115.22 |  36.33 |
-| 200 |  213.63 | 217.22 |
-| 300 |  420.63 |   fail |
-| 400 |  763.71 |   fail |
-| 500 | 1266.67 |   fail |	
-| 600 | 1896.81 |   fail |		
-| 700 | 3602.74 |   fail |
-| 800 |    fail |   fail |	
+|   n |    CPU   |   GPU   |
+|----:|---------:|--------:|
+| 100 |  115.22  |  36.33  |
+| 200 |  213.63  | 217.22  |
+| 300 |  420.63  |  fail   |
+| 400 |  763.71  |  fail   |
+| 500 | 1266.67  |  fail   |
+| 600 | 1896.81  |  fail   |
+| 700 | 3602.74  |  fail   |
+| 800 |   fail   |  fail   |
