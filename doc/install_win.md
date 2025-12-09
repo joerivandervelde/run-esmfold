@@ -26,8 +26,9 @@ conda --version
 ~/miniforge3/bin/conda env remove -n esmfold-env
 ```
 
-### Switch to location of this repo, e.g.
+### Clone this repository and step into its directory
 ```
+git clone https://github.com/joerivandervelde/run-esmfold.git
 cd /mnt/d/github/run-esmfold/
 ```
 
