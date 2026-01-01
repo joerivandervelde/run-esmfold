@@ -10,6 +10,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 import argparse
 import sys
 import time
+import tarfile
 from pathlib import Path
 
 import torch
@@ -56,16 +57,7 @@ def load_first_fasta_sequence(path: Path) -> str:
     return "".join(lines)
 
 
-def fold_sequence_to_pdb(
-    sequence: str,
-    device: torch.device,
-    chunk_size: int | None = None,
-    use_fp16: bool = False,
-) -> str:
-    """
-    Run ESMFold (Hugging Face port) on a single amino acid sequence
-    and return a PDB file as a string.
-    """
+def validate_sequence(sequence: str) -> str:
     sequence = sequence.strip().upper()
     if not sequence:
         raise ValueError("Sequence is empty.")
@@ -77,14 +69,18 @@ def fold_sequence_to_pdb(
         raise ValueError(
             f"Invalid amino acid characters in sequence: {''.join(sorted(bad))}"
         )
+    return sequence
 
-    print(f"Sequence length: {len(sequence)}", file=sys.stderr)
-    print(f"Using device: {device}", file=sys.stderr)
 
-    # TIMING START
-    t_load0 = time.time()
-
-    # --- model load options to reduce memory on CPU side ---
+def load_model(
+    device: torch.device,
+    chunk_size: int | None = None,
+    use_fp16: bool = False,
+) -> EsmForProteinFolding:
+    """
+    Load ESMFold once, move to device, configure chunking + fp16, and enable dropout.
+    """
+    t0 = time.time()
     from_kwargs = {"low_cpu_mem_usage": True}
 
     # Load ESMFold from Hugging Face
@@ -116,74 +112,264 @@ def fold_sequence_to_pdb(
     model.eval()
     enable_dropout(model)  # keep dropout active if you want stochasticity
 
-    t_load1 = time.time()
-    print(f"Model load time: {t_load1 - t_load0:.2f} sec", file=sys.stderr)
+    t1 = time.time()
+    print(f"Model load time: {t1 - t0:.2f} sec", file=sys.stderr)
+    print(f"Using device: {device}", file=sys.stderr)
 
-    # INFERENCE TIMER
-    t_inf0 = time.time()
+    return model
+
+
+def infer_pdb(model: EsmForProteinFolding, sequence: str) -> str:
+    """Run inference and return a PDB string."""
+    t0 = time.time()
     with torch.no_grad():
         pdb_str = model.infer_pdb(sequence)
-    t_inf1 = time.time()
-
-    print(f"Inference time: {t_inf1 - t_inf0:.2f} sec", file=sys.stderr)
-    print(f"Total time: {t_inf1 - t_load0:.2f} sec", file=sys.stderr)
-
+    t1 = time.time()
+    print(f"Inference time: {t1 - t0:.2f} sec", file=sys.stderr)
     return pdb_str
+
+
+def output_path_for_run(faa_path: Path, run_idx: int) -> Path:
+    """
+    Turn:
+      /x/LMNA-...-wt.faa
+    into:
+      /x/LMNA-...-wt-<run_idx>.pdb
+    """
+    stem = faa_path.stem  # filename without suffix
+    return faa_path.with_name(f"{stem}-{run_idx}.pdb")
+
+
+def iter_faa_files(root: Path) -> list[Path]:
+    """Return all .faa files under root (recursive), sorted for stable order."""
+    return sorted(p for p in root.rglob("*.faa") if p.is_file())
+
+
+def run_single(args: argparse.Namespace) -> None:
+    device = pick_device()
+    model = load_model(device=device, chunk_size=args.chunk_size, use_fp16=args.fp16)
+
+    if args.sequence:
+        seq = validate_sequence(args.sequence)
+    else:
+        seq = validate_sequence(load_first_fasta_sequence(args.fasta))
+
+    pdb_str = infer_pdb(model, seq)
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(pdb_str)
+    print(f"Wrote PDB to {args.output}", file=sys.stderr)
+
+def archive_path_for_faa(faa_path: Path) -> Path:
+    # e.g. LMNA-...-es1.faa -> LMNA-...-es1.pdbs.tar.gz
+    return faa_path.with_suffix(".pdbs.tar.gz")
+
+
+def pdb_paths_for_faa(faa_path: Path, runs: int) -> list[Path]:
+    return [output_path_for_run(faa_path, r) for r in range(runs)]
+
+
+def all_pdbs_exist(faa_path: Path, runs: int) -> bool:
+    return all(p.exists() for p in pdb_paths_for_faa(faa_path, runs))
+
+
+def create_archive(faa_path: Path, runs: int, overwrite: bool) -> Path | None:
+    """
+    Create .tar.gz containing all run PDBs for the given .faa.
+    Returns the archive path if created/exists, otherwise None.
+    """
+    pdbs = pdb_paths_for_faa(faa_path, runs)
+    if not all(p.exists() for p in pdbs):
+        return None  # not ready
+
+    archive_path = archive_path_for_faa(faa_path)
+
+    # If archive already exists and we're not overwriting, treat as "done"
+    if archive_path.exists() and not overwrite:
+        return archive_path
+
+    # Create/overwrite archive
+    with tarfile.open(archive_path, "w:gz") as tar:
+        for p in pdbs:
+            tar.add(p, arcname=p.name)
+
+    # Verify it exists and is non-empty-ish
+    if not archive_path.exists() or archive_path.stat().st_size == 0:
+        raise RuntimeError(f"Archive creation failed: {archive_path}")
+
+    print(f"  ✓ archived: {archive_path}", file=sys.stderr)
+    return archive_path
+
+
+def delete_archived_pdbs(faa_path: Path, runs: int) -> int:
+    """
+    Delete PDBs for this .faa (only if they exist).
+    Returns number deleted.
+    """
+    deleted = 0
+    for p in pdb_paths_for_faa(faa_path, runs):
+        if p.exists():
+            p.unlink()
+            deleted += 1
+    if deleted:
+        print(f"  ✓ deleted {deleted} PDBs for {faa_path.name}", file=sys.stderr)
+    return deleted
+
+
+def maybe_archive_and_cleanup(faa_path: Path, runs: int, overwrite: bool) -> bool:
+    """
+    If all PDBs exist, ensure archive exists (or overwrite), then delete PDBs.
+    Returns True if archive+cleanup completed, else False.
+    """
+    if not all_pdbs_exist(faa_path, runs):
+        return False
+
+    archive_path = create_archive(faa_path, runs, overwrite=overwrite)
+    if archive_path is None:
+        return False
+
+    # Only delete if archive definitely exists
+    if not archive_path.exists():
+        raise RuntimeError(f"Expected archive missing after creation: {archive_path}")
+
+    delete_archived_pdbs(faa_path, runs)
+    return True
+
+
+def run_esp_esp(args: argparse.Namespace) -> None:
+    data_root = Path(args.data_root).expanduser().resolve()
+    bin_root = (data_root / args.bin).resolve()
+
+    if not bin_root.exists() or not bin_root.is_dir():
+        raise SystemExit(f"Bin directory not found: {bin_root}")
+
+    faa_files = iter_faa_files(bin_root)
+    if not faa_files:
+        raise SystemExit(f"No .faa files found under: {bin_root}")
+
+    # --- First: sweep/repair pass (archive+cleanup anything already complete) ---
+    swept = 0
+    for faa_path in faa_files:
+        try:
+            if maybe_archive_and_cleanup(
+                faa_path=faa_path,
+                runs=args.runs,
+                overwrite=args.overwrite,
+            ):
+                swept += 1
+        except Exception as e:
+            print(f"[sweep] Warning: {faa_path} (error: {e})", file=sys.stderr)
+
+    if swept:
+        print(f"[sweep] Archived+cleaned {swept} completed .faa entries.", file=sys.stderr)
+
+    device = pick_device()
+    model = load_model(device=device, chunk_size=args.chunk_size, use_fp16=args.fp16)
+
+    print(f"Found {len(faa_files)} .faa files under {bin_root}", file=sys.stderr)
+    print(f"Runs per file: {args.runs}", file=sys.stderr)
+    print(f"Default behavior: skip existing PDBs; use --overwrite to recompute", file=sys.stderr)
+
+    total_written = 0
+    for i, faa_path in enumerate(faa_files, start=1):
+        # If already archived and we're not overwriting, we can skip folding entirely
+        archive_path = archive_path_for_faa(faa_path)
+        if archive_path.exists() and not args.overwrite:
+            # still: if there are stray PDBs around, clean them up safely
+            try:
+                delete_archived_pdbs(faa_path, args.runs)
+            except Exception as e:
+                print(f"[{i}/{len(faa_files)}] Warning: cleanup failed for {faa_path} ({e})", file=sys.stderr)
+            print(f"[{i}/{len(faa_files)}] Skipping (archive exists): {archive_path.name}", file=sys.stderr)
+            continue
+
+        # Load sequence
+        try:
+            seq = validate_sequence(load_first_fasta_sequence(faa_path))
+        except Exception as e:
+            print(f"[{i}/{len(faa_files)}] Skipping {faa_path} (error: {e})", file=sys.stderr)
+            continue
+
+        print(f"[{i}/{len(faa_files)}] Folding {faa_path} (len={len(seq)})", file=sys.stderr)
+
+        # Generate missing PDBs (or overwrite all if requested)
+        for r in range(args.runs):
+            out_path = output_path_for_run(faa_path, r)
+
+            if out_path.exists() and not args.overwrite:
+                print(f"  - exists, skipping: {out_path.name}", file=sys.stderr)
+                continue
+
+            pdb_str = infer_pdb(model, seq)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(pdb_str)
+            total_written += 1
+            print(f"  - wrote: {out_path.name}", file=sys.stderr)
+
+        # After processing this .faa: archive if complete, then delete PDBs
+        try:
+            maybe_archive_and_cleanup(
+                faa_path=faa_path,
+                runs=args.runs,
+                overwrite=args.overwrite,
+            )
+        except Exception as e:
+            print(f"[{i}/{len(faa_files)}] Warning: archive/cleanup failed for {faa_path} ({e})", file=sys.stderr)
+
+    print(f"Done. Wrote {total_written} PDB files.", file=sys.stderr)
+
 
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
-        description="Fold an amino acid sequence with ESMFold and write a PDB file."
+        description="Fold amino acid sequences with ESMFold (single or batch esp-esp mode)."
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--sequence",
-        type=str,
-        help="Amino acid sequence as a single string (e.g. 'ACDEFGHIKLMNPQRSTVWY').",
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    # ---- single mode (your original behavior) ----
+    p_single = sub.add_parser("single", help="Fold a single sequence (sequence or fasta) to one PDB.")
+    group = p_single.add_mutually_exclusive_group(required=True)
+    group.add_argument("--sequence", type=str, help="Amino acid sequence as a single string.")
+    group.add_argument("--fasta", type=Path, help="Path to a FASTA file (first sequence used).")
+    p_single.add_argument("--output", type=Path, required=True, help="Output PDB file path.")
+    p_single.add_argument("--chunk-size", type=int, default=128, help="ESMFold trunk chunk size.")
+    p_single.add_argument("--fp16", action="store_true", help="Use fp16 for ESM trunk on CUDA.")
+    p_single.set_defaults(func=run_single)
+
+    # ---- esp-esp batch mode ----
+    p_batch = sub.add_parser(
+        "esp-esp",
+        help="Batch mode: find all .faa under <data-root>/<bin>/ and fold each N times to PDBs beside the .faa."
     )
-    group.add_argument(
-        "--fasta",
-        type=Path,
-        help="Path to a FASTA file. Only the first sequence will be used.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
+    p_batch.add_argument(
+        "--bin",
         required=True,
-        help="Output PDB file path.",
+        type=str,
+        help="Bin name such as 501-600, 101-200, 201-300, etc.",
     )
-    parser.add_argument(
-        "--chunk-size",
+    p_batch.add_argument(
+        "--data-root",
+        required=True,
+        type=str,
+        help="Directory that contains the bin folders (e.g. esp-esp/data/protein-folding/mane-plus-clinical).",
+    )
+    p_batch.add_argument(
+        "--runs",
         type=int,
-        default=128,
-        help="ESMFold trunk chunk size (smaller = less memory, slower; e.g. 64, 32).",
+        default=10,
+        help="How many stochastic folds to run per .faa (default: 10).",
     )
-    parser.add_argument(
-        "--fp16",
+    p_batch.add_argument(
+        "--overwrite",
         action="store_true",
-        help="Use fp16 for the ESM trunk on CUDA to reduce memory usage.",
+        help="Overwrite existing PDB files (default: skip existing).",
     )
+    p_batch.add_argument("--chunk-size", type=int, default=128, help="ESMFold trunk chunk size.")
+    p_batch.add_argument("--fp16", action="store_true", help="Use fp16 for ESM trunk on CUDA.")
+    p_batch.set_defaults(func=run_esp_esp)
 
     args = parser.parse_args(argv)
-
-    # Get sequence either from CLI or from FASTA
-    if args.sequence:
-        seq = args.sequence
-    else:
-        seq = load_first_fasta_sequence(args.fasta)
-
-    device = pick_device()
-    pdb_str = fold_sequence_to_pdb(
-        seq,
-        device=device,
-        chunk_size=args.chunk_size,
-        use_fp16=args.fp16,
-    )
-
-    # Write PDB
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(pdb_str)
-    print(f"Wrote PDB to {args.output}", file=sys.stderr)
+    args.func(args)
 
 
 if __name__ == "__main__":
