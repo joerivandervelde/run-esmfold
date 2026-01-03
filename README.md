@@ -41,6 +41,17 @@ Inference time: 49.58 sec
 Total time: 215.33 sec
 ```
 
+### Batch run example
+
+```
+cd ~/git/run-esmfold
+source ~/miniforge3/bin/activate
+conda activate esmfold-env 
+python src/run_esmfold.py esp-esp --data-root /mnt/c/Users/joeri/git/esp-esp/data/protein-folding/mane-select --bin 201-300
+python src/run_esmfold.py esp-esp --data-root /mnt/c/Users/joeri/git/esp-esp/data/protein-folding/mane-plus-clinical --bin 201-300
+```
+
+
 ### Benchmarks
 
 Larger proteins require GPU to fold in reasonable time. However, if you have more RAM than VRAM, you can (slowly) fold proteins in CPU mode that are impossible in GPU mode. Case in point, folding the first 800AA of COL7A1 (UniProt Q02388) on a Intel i7-4790K 4 cores @ 4.00GHz Windows PC with 32GB RAM via WSL Ubuntu-22.04:
